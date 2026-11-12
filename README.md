@@ -1,6 +1,6 @@
 # SoftReel 숏폼 영상 점멸 검출과 국소 보정
 
-[기술 보고서 PDF](./SoftReel_Technical_Report.pdf) · [보고서 원문](./SoftReel_Technical_Report.md) · [Team L-EOD 프로젝트 저장소](https://github.com/SKT-FLY-AI-9-6/gumchulgi)
+[기술 보고서 PDF](./SoftReel_Technical_Report.pdf) · [보고서 원문](./SoftReel_Technical_Report.md) · [Zenodo DOI: 10.5281/zenodo.24150972](https://doi.org/10.5281/zenodo.24150972) · [Team L-EOD 프로젝트 저장소](https://github.com/SKT-FLY-AI-9-6/gumchulgi)
 
 SoftReel은 업로드한 숏폼 영상에서 휘도와 적색 점멸 등을 검출하고, 후보 영역의 화소별 휘도와 색 변화량을 제한합니다. 워커는 강한 설정으로 보정한 영상을 다시 판정합니다. 위반이 남으면 기본 설정으로 보정한 뒤 두 출력의 위반 항목을 비교해 결과를 선택합니다. [워커 구현](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/server/worker/pipeline.py)
 
