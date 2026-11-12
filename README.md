@@ -1,81 +1,45 @@
-# SoftReel — 광과민성(PSE) 보호 숏폼 플랫폼 MVP (`platform-mvp`)
+# SoftReel 숏폼 영상 점멸 검출과 국소 보정
 
-영상을 올리면 서버가 광과민성 발작 유발 자극(플래시·적색·패턴·컷)을 검출하고
-보정본을 만든다. 앱은 세로 스와이프 피드에서 원본/보정본을 재생하며,
-사용자의 하루 위험 노출량을 대시보드로 보여준다.
+[기술 보고서 PDF](./SoftReel_Technical_Report.pdf) · [보고서 원문](./SoftReel_Technical_Report.md) · [Team L-EOD 프로젝트 저장소](https://github.com/SKT-FLY-AI-9-6/gumchulgi)
 
-```
-app/               Flutter 앱 (Android/iOS/web)
-server/app/        FastAPI — 인증, 업로드, 피드, 스트리밍, 대시보드
-server/worker/     큐 워커 — ffmpeg 정규화 → 검출 → 보정 사다리
-psepipe_v3_seam/   검출기·필터 (pse_bt1702, pselive3, psegpu_full)
-docs/              설계 스펙, 실행 가이드
-```
+SoftReel은 업로드한 숏폼 영상에서 휘도와 적색 점멸 등을 검출하고, 후보 영역의 화소별 휘도와 색 변화량을 제한합니다. 워커는 강한 설정으로 보정한 영상을 다시 판정합니다. 위반이 남으면 기본 설정으로 보정한 뒤 두 출력의 위반 항목을 비교해 결과를 선택합니다. [워커 구현](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/server/worker/pipeline.py)
 
-## 빠른 시작 (노트북 = 서버, 폰 = 클라이언트)
+**보고서 작성** Kyungdon Moon  
+**프로젝트** SKT FLY AI Challenger 9기 Team L-EOD
 
-### 준비 (1회)
-- Python 3.10+, `ffmpeg`/`ffprobe` PATH 등록, Flutter SDK
-- CUDA torch가 있으면 워커가 자동으로 GPU 필터(`psegpu_full`)를 쓰고, 없으면 CPU(`pselive3`)로 떨어진다 — 동작은 같고 느릴 뿐.
+## 검출·보정 구조
 
-```powershell
-pip install -r server\requirements.txt
-copy server\.env.example server\.env      # JWT_SECRET 을 긴 임의 문자열로 변경
-```
+| 모듈 | 역할 |
+| --- | --- |
+| [점멸 검출기](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/pse_bt1702.py) | 분석 프레임을 선형광으로 변환하고, 휘도·적색 점멸과 패턴·화면전환 등의 위반을 판정합니다. |
+| [CPU 보정 필터](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/pselive3.py) | 점멸 후보 마스크에 화소별 변화율 제한과 밝기 세부 복원을 적용합니다. |
+| [GPU 이식판](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/psegpu_full.py) | CUDA 환경의 보정 경로입니다. |
+| [업로드 워커](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/server/worker/pipeline.py) | 정규화, 입력 판정, 보정, 출력 재판정을 실행합니다. |
 
-폰에서 접속하려면 방화벽 8000 포트를 열어야 한다 (관리자 PowerShell):
+## 실행
 
-```powershell
-netsh advfirewall firewall add rule name="gumchulgi-api" dir=in action=allow protocol=TCP localport=8000
-```
+서버 실행과 모바일 앱 설치 절차는 [원본 프로젝트의 빠른 시작](https://github.com/SKT-FLY-AI-9-6/gumchulgi#빠른-시작-노트북--서버-폰--클라이언트)과 [서버 실행 안내](./server/README.md)를 참고하세요. Python, FFmpeg와 Flutter 설치 및 서버 환경 변수 설정이 필요합니다.
 
-### 서버 실행
+CPU 필터의 자기감시 보정은 공개 GPU 이식판에서 미구현 상태로 표시돼 있습니다. [GPU 이식판](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/psegpu_full.py)
 
-한 번에 (API + 워커, `server\.env` 로드, 데이터는 `data\`):
+## 실사 영상 검증
 
-```powershell
-powershell -ExecutionPolicy Bypass -File run_server.ps1
-```
+팀의 실사 개발 로그 209편 중 원본에 위반이 있던 41편을 비교했습니다. 아래 수치는 보정본을 선택할 때도 사용한 자체 검출기의 판정입니다. [영상별 판정 CSV](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/validation/fallback_209.csv)
 
-또는 터미널 2개로 따로 (`scripts\run_api.ps1`, `scripts\run_worker.ps1`).
-`http://localhost:8000/health` 가 `{"ok":true}` 면 준비 완료.
+| 처리 방식 | 적합 전환 | 위반 잔존 |
+| --- | ---: | ---: |
+| 기본 설정 | 14/41 | 27/41 |
+| 강한 설정 | 19/41 | 22/41 |
+| 재판정 후 선택 | 21/41 | 20/41 |
 
-### 앱 빌드 → 폰 설치
+세부 복원 폭과 방향성 검사를 함께 바꾼 개발 실험에서 실사 6편의 판정이 나빠졌습니다. 설정별 재실행에서 휘도 점멸이 다시 나타난 3편은 모두 세부 복원 폭과 관련됐습니다. 209편 로그에서는 강한 설정으로 적합했던 영상이 19편이었고, 기본 설정에서만 적합한 영상 2편이 더 있었습니다. [회귀 실험 기록](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/validation/REGRESS_0820.md)
 
-서버 주소가 APK 안에 박히므로 노트북 IP(`ipconfig` → IPv4)를 넣어 빌드한다.
-폰과 노트북은 **같은 와이파이**여야 하고, IP가 바뀌면 다시 빌드해야 한다.
+합성 영상 24편에서 EA IRIS와 판정을 비교한 결과, 선형광 적색 비율을 적용하기 전에는 18편, 적용 후에는 20편이 일치했습니다. 실사 비교에서는 두 검출기가 19편 중 17편에서 일치했습니다. 실사 비교군 19편은 모두 위 209편 로그에도 포함됩니다. [IRIS 비교 기록](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/IRIS_%EA%B5%90%EC%B0%A8%EA%B2%80%EC%A6%9D_v0.1.md) · [실사 비교 기록](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/validation/README.md)
 
-```powershell
-cd app
-flutter pub get
-flutter build apk --dart-define=API_BASE=http://192.168.0.7:8000
-```
+별도 실사 3편에서 BlazeBVD 재구현도 비교했습니다. 두 방식이 모두 적합 판정을 받은 한 영상의 경계 왜곡 점수는 자체 필터 2.542, BlazeBVD 29.849였습니다. 다른 영상에서는 BlazeBVD가 자체 필터 출력에 남은 화면전환 위반을 해소했습니다. [비교 로그](https://github.com/SKT-FLY-AI-9-6/gumchulgi/blob/bbfb1a37140e9aa393719fe5e623165e048aa4ab/psepipe_v3_seam/validation/ad_blazebvd_full.csv)
 
-`app\build\app\outputs\flutter-apk\app-release.apk` 를 폰에 복사해 설치.
-에뮬레이터는 `--dart-define` 없이 빌드하면 기본값 `http://10.0.2.2:8000` 으로 호스트에 붙는다.
+## 제가 맡은 작업
 
-### 사용 흐름
-1. 회원가입 → 업로드 탭에서 갤러리 영상 선택(500MB·3분 제한) → 업로드
-2. 워커가 검출·보정을 끝내면 홈 피드와 내 페이지에 표시 (홈 아이콘 재탭 / 당겨서 새로고침)
-3. 화면 탭 = 일시정지/재생. 우상단 필터 아이콘 → **필터 기능 켜기** 토글로 보던 자리에서 원본↔보정본 전환
-4. 위험 영상 원본 시청이 하루 예산의 80%를 넘고 필터가 꺼져 있으면 경고 배너 → 대시보드에서 노출 추이 확인
-
-## 데이터 위치
-`data\db.sqlite3` (계정·영상 메타·시청 기록) + `data\media\{id}\` (원본/보정본/썸네일/리포트).
-서버를 꺼도 유지되며, 초기화하려면 `data\` 폴더를 지운다. `.env` 와 `data\` 는 커밋하지 않는다.
-
-## 테스트
-```powershell
-cd server; python -m pytest tests -q
-cd app;    flutter analyze; flutter test
-```
-
-## 더 읽기
-- `docs/superpowers/specs/2026-08-20-platform-mvp-design.md` — MVP 설계 스펙(노출 규칙, API)
-- `docs/노트북-서버-실행.md` — GPU 노트북 실행 상세
-- `docs/아키텍처-개요.md`, `docs/검출기-통합.md` — 구조와 검출기 통합 경위
-- `server/README.md` — Docker / EC2 배포(CPU 경로)
-- `deploy/azure/README.md` — Azure VM + Flutter 웹 HTTPS 배포(CPU 경로)
-
-## 브랜치 규칙 (저장소 공통)
-`main` 은 비워 둔다. 작업은 자기 이름/기능 브랜치에서 하고 push 한다.
+- 원본과 보정본의 휘도, 점멸 이벤트, 색도 변화를 측정하고, 워커에 저장된 결과를 대시보드 API와 Flutter 화면에 연결했습니다. [보정 영향 지표 및 대시보드 커밋](https://github.com/SKT-FLY-AI-9-6/gumchulgi/commit/55a136dbbe6ddb7b4d4e24704633b50b49695371)
+- 실제 업로드 API와 보정 워커를 사용해 보정본의 시청 이벤트와 영향 지표가 대시보드 응답까지 전달되는지 검증했습니다. [종단 테스트 커밋](https://github.com/SKT-FLY-AI-9-6/gumchulgi/commit/52eebe5bd130f92c13c9e8201389d222477c3964)
+- 업로더 스튜디오에 원본·보정본 전환과 위반 구간 표시를 구현하고, 측정 마커가 잔존 위반으로 잘못 표시되던 버그를 수정했습니다. [업로더 스튜디오 커밋](https://github.com/SKT-FLY-AI-9-6/gumchulgi/commit/321819cc1f54859e5812c1dad7c480f2a981f85d)
